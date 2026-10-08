@@ -296,9 +296,11 @@ def generate(template_file, report_file=None, master_files=None, raw_file=None, 
     step(5, 'テンプレートを読み込んでいます…')
     wb=load_workbook(io.BytesIO(template_file.getvalue()),data_only=False)
     try:
-        wb.calculation.fullCalcOnLoad = False
-        wb.calculation.forceFullCalc = False
-        wb.calculation.calcMode = 'manual'
+        # Excelで開いたときに数式を自動再計算する
+        wb.calculation.fullCalcOnLoad = True
+        wb.calculation.forceFullCalc = True
+        wb.calculation.calcOnSave = True
+        wb.calculation.calcMode = 'auto'
     except Exception:
         pass
     # Make newly created/un-styled cells use Meiryo UI without restyling millions of cells.

@@ -244,9 +244,24 @@ def build_backend_sheet(template_wb, raw_file):
     if raw_rows and (ws.cell(2,1).value != raw_rows[0][0] or ws.max_row != len(raw_rows)+1):
         raise RuntimeError('後方数値シートの書き込み位置が不正です。')
 
+    # Remove stale template headers/cells to the right of the actual output (AE:AI).
+    for key in [key for key in ws._cells if key[1] > 35]:
+        del ws._cells[key]
+    for col in range(36, 41):
+        ws.column_dimensions.pop(get_column_letter(col), None)
+
+    # Date display: retain actual date values and suppress time in B, D, G.
+    for row_idx in range(2, len(raw_rows) + 2):
+        for col in (2, 4, 7):
+            cell = ws.cell(row_idx, col)
+            if isinstance(cell.value, (datetime, date)):
+                cell.number_format = 'yyyy/m/d'
+
     # Rewrite retained calculated headers because unwanted columns never get created.
     retained_headers = ['媒体','コスト','年齢グループ','申込月','YDO行数判定']
     for c,h in enumerate(retained_headers,start=31): ws.cell(1,c).value=h
+    if ws.max_column != 35:
+        raise RuntimeError(f'後方数値シートの列数が不正です: {ws.max_column}列（期待値35列）')
     return len(raw_rows)
 
 def finish_sheet_settings(wb):
@@ -329,7 +344,7 @@ with st.form('files'):
     col1, col2 = st.columns(2)
     with col1:
         f1=st.file_uploader('ファイル1：後方数値分析ツール メルマガ　新型 定例用（必須）',type=['xlsx'])
-        f3=st.file_uploader('ファイル3：媒体コード（複数選択可）',type=['xlsx'],accept_multiple_files=True)
+        f3=st.file_uploader('ファイル3：媒体コード（複数UP可）',type=['xlsx'],accept_multiple_files=True)
     with col2:
         f2=st.file_uploader('ファイル2：メール広告レポート（任意）',type=['xlsx'])
         f4=st.file_uploader('ファイル4：後方数値ローデータ（任意）',type=['xlsx'])

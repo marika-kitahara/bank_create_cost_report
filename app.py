@@ -9,9 +9,9 @@ from openpyxl.utils import get_column_letter
 from openpyxl.writer.excel import ExcelWriter
 from zipfile import ZipFile, ZIP_DEFLATED
 
-st.set_page_config(page_title='後方数値分析ツール生成', layout='wide')
-st.title('後方数値分析ツール生成')
-st.caption('v7：Excel保存の圧縮負荷を軽減。3シート・数式・書式・A1選択は維持します。')
+st.set_page_config(page_title='後方数値分析ツール メルマガ　新型 定例用　生成', layout='wide')
+st.title('後方数値分析ツール メルマガ　新型 定例用　生成')
+st.caption('アップロードしたファイルを集計し統合したExcelファイルを生成します。')
 
 FONT_NAME = 'Meiryo UI'
 KEEP_SHEETS = ['コストデータ', '後方数値データ(加工版)', '媒体コードマスタver3']
@@ -232,10 +232,17 @@ def build_backend_sheet(template_wb, raw_file):
         for row_idx in list(ws.row_dimensions):
             if row_idx > 1:
                 del ws.row_dimensions[row_idx]
+    # IMPORTANT: append() uses _current_row, not the contents of _cells.
+    # Reset it after clearing, otherwise rows get appended far below row 1.
+    ws._current_row = 1
     for vals,(media,m,age) in zip(raw_rows,derived):
         cnt=counts.get((compact(media),m),0)
         total=media_month_cost.get((compact(media),m),0.0)
         ws.append(vals + (media, total/cnt if cnt else 0, age, m, cnt))
+
+    # Guard against blank or displaced output rows.
+    if raw_rows and (ws.cell(2,1).value != raw_rows[0][0] or ws.max_row != len(raw_rows)+1):
+        raise RuntimeError('後方数値シートの書き込み位置が不正です。')
 
     # Rewrite retained calculated headers because unwanted columns never get created.
     retained_headers = ['媒体','コスト','年齢グループ','申込月','YDO行数判定']
@@ -321,11 +328,11 @@ def generate(template_file, report_file=None, master_files=None, raw_file=None, 
 with st.form('files'):
     col1, col2 = st.columns(2)
     with col1:
-        f1=st.file_uploader('ファイル1：後方数値分析ツール（必須）',type=['xlsx'])
-        f3=st.file_uploader('ファイル3：媒体コード元データ（複数選択可）',type=['xlsx'],accept_multiple_files=True)
+        f1=st.file_uploader('ファイル1：後方数値分析ツール メルマガ　新型 定例用（必須）',type=['xlsx'])
+        f3=st.file_uploader('ファイル3：媒体コード（複数選択可）',type=['xlsx'],accept_multiple_files=True)
     with col2:
         f2=st.file_uploader('ファイル2：メール広告レポート（任意）',type=['xlsx'])
-        f4=st.file_uploader('ファイル4：後方数値データ ローデータ（任意）',type=['xlsx'])
+        f4=st.file_uploader('ファイル4：後方数値ローデータ（任意）',type=['xlsx'])
     st.caption('ファイル2〜4は未指定でも生成できます。未指定ファイルに対応するシートは、ファイル1の内容をそのまま維持します。')
     go=st.form_submit_button('Excelを生成',type='primary',use_container_width=True)
 

@@ -54,7 +54,6 @@ def parse_report_sheet_aggregated(ws):
     Returns (normal_by_month, ydo_by_month, months).
     """
     header_row=None; headers={}
-    # read_only worksheets are much faster when iterated rather than random cell access
     for ridx,row in enumerate(ws.iter_rows(min_row=1,max_row=20,values_only=True), start=1):
         vals=[norm(v) for v in row[:20]]
         if '配信日' in vals and any('Cost(Gross)' in x for x in vals):
@@ -86,7 +85,6 @@ def parse_report_sheet_aggregated(ws):
 
 def build_cost_sheet(template_wb, report_wb):
     ws=template_wb['コストデータ']
-    # Map requested media names to actual report sheets once.
     media_to_sheet={}
     wanted={norm(ws.cell(r,2).value) for r in range(2,ws.max_row+1) if ws.cell(r,2).value}
     for item2 in wanted:
@@ -95,7 +93,6 @@ def build_cost_sheet(template_wb, report_wb):
         media_to_sheet[item2]=next((sn for sn in report_wb.sheetnames if ct and ct in compact(sn)),None)
 
     aggs={}; months=set()
-    # Parse only sheets actually referenced by cost data.
     for sn in {x for x in media_to_sheet.values() if x}:
         normal,ydo,ms=parse_report_sheet_aggregated(report_wb[sn])
         aggs[sn]=(normal,ydo); months.update(ms)
@@ -144,7 +141,6 @@ def load_master_inputs(files):
 
 def build_master_sheet(template_wb, master_files):
     ws=template_wb['媒体コードマスタver3']
-    # Capture existing D:G / I formulas by media code before replacing rows.
     formula_map={}
     for r in range(2,ws.max_row+1):
         code=norm(ws.cell(r,2).value)
@@ -152,7 +148,6 @@ def build_master_sheet(template_wb, master_files):
             formula_map[code]=tuple(ws.cell(r,c).value for c in (4,5,6,7,9)) + (r,)
     rows=load_master_inputs(master_files)
     old_max=ws.max_row
-    # Clear A:L data only, preserve header and formatting skeleton.
     for r in range(2,max(old_max,len(rows)+1)+1):
         for c in range(1,13): ws.cell(r,c).value=None
     missing_formula=0
@@ -169,15 +164,12 @@ def build_master_sheet(template_wb, master_files):
                     except Exception: ws.cell(idx,col).value=re.sub(r'(?<=[A-Z])\d+',str(idx),val)
                 else: ws.cell(idx,col).value=val
         else:
-            # Generic fallback only when the uploaded media code does not exist in the template.
             ws.cell(idx,4).value=f'=IFERROR(TEXTBEFORE(TEXTAFTER(C{idx},"_",1),"_"),"")'
             ws.cell(idx,5).value=f'=IFERROR(TEXTBEFORE(TEXTAFTER(C{idx},"_",2),"_"),"")'
             # F/G/I have no safe generic rule; leave them blank rather than inventing a formula.
             ws.cell(idx,9).value=f'=IFERROR(TEXTBEFORE(TEXTAFTER(C{idx},"_",3),"_"),"")'
             missing_formula+=1
-    # Remove unused rows physically.
     if ws.max_row > len(rows)+1: ws.delete_rows(len(rows)+2, ws.max_row-(len(rows)+1))
-    # The source template contains hidden rows; output all master rows visibly.
     for r in range(1, ws.max_row + 1):
         ws.row_dimensions[r].hidden = False
     return len(rows),missing_formula
@@ -213,7 +205,6 @@ def build_backend_sheet(template_wb, raw_file):
             try: media_month_cost[(compact(media),m)] += float(cost_ws.cell(r,c).value or 0)
             except Exception: pass
 
-    # Stream input in read-only mode; build compact derived metadata in one pass.
     raw_rows=[]; derived=[]; counts=defaultdict(int)
     for vals in raw.iter_rows(min_row=2,min_col=1,max_col=30,values_only=True):
         if not any(v is not None for v in vals): continue
@@ -223,41 +214,31 @@ def build_backend_sheet(template_wb, raw_file):
         if media and m: counts[(compact(media),m)] += 1
     raw_wb.close()
 
-    # Keep header formatting, remove old body once, then append FINAL 35-column rows directly.
-    # Final columns = A:AD + AG(media) + AK(cost) + AL(age) + AM(month) + AN(count).
-    # Fast clear: delete the previous body directly, avoiding expensive row shifting.
-    # Preserve header cells, worksheet dimensions, formatting and metadata.
     if ws.max_row > 1:
         ws._cells = {key: cell for key, cell in ws._cells.items() if key[0] == 1}
         for row_idx in list(ws.row_dimensions):
             if row_idx > 1:
                 del ws.row_dimensions[row_idx]
-    # IMPORTANT: append() uses _current_row, not the contents of _cells.
-    # Reset it after clearing, otherwise rows get appended far below row 1.
     ws._current_row = 1
     for vals,(media,m,age) in zip(raw_rows,derived):
         cnt=counts.get((compact(media),m),0)
         total=media_month_cost.get((compact(media),m),0.0)
         ws.append(vals + (media, total/cnt if cnt else 0, age, m, cnt))
 
-    # Guard against blank or displaced output rows.
     if raw_rows and (ws.cell(2,1).value != raw_rows[0][0] or ws.max_row != len(raw_rows)+1):
         raise RuntimeError('後方数値シートの書き込み位置が不正です。')
 
-    # Remove stale template headers/cells to the right of the actual output (AE:AI).
     for key in [key for key in ws._cells if key[1] > 35]:
         del ws._cells[key]
     for col in range(36, 41):
         ws.column_dimensions.pop(get_column_letter(col), None)
 
-    # Date display: retain actual date values and suppress time in B, D, G.
     for row_idx in range(2, len(raw_rows) + 2):
         for col in (2, 4, 7):
             cell = ws.cell(row_idx, col)
             if isinstance(cell.value, (datetime, date)):
                 cell.number_format = 'yyyy/m/d'
 
-    # Rewrite retained calculated headers because unwanted columns never get created.
     retained_headers = ['媒体','コスト','年齢グループ','申込月','YDO行数判定']
     for c,h in enumerate(retained_headers,start=31): ws.cell(1,c).value=h
     if ws.max_column != 35:
@@ -265,8 +246,6 @@ def build_backend_sheet(template_wb, raw_file):
     return len(raw_rows)
 
 def finish_sheet_settings(wb):
-    # Existing template formatting is retained. Avoid restyling millions of cells.
-    # Remove worksheet filters as requested and keep sensible template widths.
     for ws in wb.worksheets:
         ws.auto_filter.ref = None
         ws.sheet_view.selection[0].activeCell = 'A1'
@@ -283,11 +262,8 @@ def finish_sheet_settings(wb):
                 ws.column_dimensions[letter].width = 45
 
 def save_fast(wb, out):
-    # openpyxlの標準保存と同じExcelWriterを使い、ZIP圧縮レベルのみ変更。
-    # Excelの内容や数式は変えず、CPU負荷を軽減する。
     with ZipFile(out, 'w', ZIP_DEFLATED, allowZip64=True, compresslevel=1) as archive:
         ExcelWriter(wb, archive).write_data()
-
 
 def generate(template_file, report_file=None, master_files=None, raw_file=None, progress=None):
     def step(pct, msg):
@@ -296,14 +272,12 @@ def generate(template_file, report_file=None, master_files=None, raw_file=None, 
     step(5, 'テンプレートを読み込んでいます…')
     wb=load_workbook(io.BytesIO(template_file.getvalue()),data_only=False)
     try:
-        # Excelで開いたときに数式を自動再計算する
         wb.calculation.fullCalcOnLoad = True
         wb.calculation.forceFullCalc = True
         wb.calculation.calcOnSave = True
         wb.calculation.calcMode = 'auto'
     except Exception:
         pass
-    # Make newly created/un-styled cells use Meiryo UI without restyling millions of cells.
     if wb._fonts:
         base = wb._fonts[0]
         wb._fonts[0] = Font(name=FONT_NAME, size=base.sz or 11, bold=base.b, italic=base.i,
